@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/meshery/meshery/mesheryctl/internal/cli/root/config"
 	"github.com/meshery/meshery/mesheryctl/internal/cli/root/constants"
@@ -113,6 +114,7 @@ mesheryctl version
 		url := mctlCfg.GetBaseMesheryURL()
 		build := constants.GetMesheryctlVersion()
 		commitsha := constants.GetMesheryctlCommitsha()
+		defer utils.CheckMesheryctlClientVersion(build)
 
 		version := config.Version{
 			Build:          "unavailable",
@@ -130,8 +132,7 @@ mesheryctl version
 			return
 		}
 
-		defer utils.CheckMesheryctlClientVersion(build)
-		client := &http.Client{}
+		client := &http.Client{Timeout: 10 * time.Second}
 		resp, err := client.Do(req)
 
 		if err != nil {
