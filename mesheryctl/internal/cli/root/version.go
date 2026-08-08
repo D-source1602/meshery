@@ -109,7 +109,7 @@ mesheryctl version
 		}
 		return nil
 	},
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 
 		url := mctlCfg.GetBaseMesheryURL()
 		build := constants.GetMesheryctlVersion()
@@ -128,8 +128,9 @@ mesheryctl version
 		req, err := http.NewRequest("GET", fmt.Sprintf("%s/api/system/version", url), nil)
 		if err != nil {
 			utils.PrintToTable(header, rows, nil)
-			utils.Log.Error(ErrGettingRequestContext(err))
-			return
+			wrappedErr := ErrGettingRequestContext(err)
+			utils.Log.Error(wrappedErr)
+			return wrappedErr
 		}
 
 		client := &http.Client{Timeout: 10 * time.Second}
@@ -137,33 +138,32 @@ mesheryctl version
 
 		if err != nil {
 
-			// resp is nil here except when CheckRedirect fails, and in that
-			// case net/http has already closed resp.Body for us — see the
-			// (Client).Do docs — so there is nothing left to close.
-
 			utils.PrintToTable(header, rows, nil)
-			utils.Log.Warn(ErrConnectingToServer(err))
-			return
+			wrappedErr := ErrConnectingToServer(err)
+			utils.Log.Warn(wrappedErr)
+			return wrappedErr
 		}
 
-		// needs multiple defer as Body.Close needs a valid response
 		defer func() { _ = resp.Body.Close() }()
 		data, err := io.ReadAll(resp.Body)
 		if err != nil {
 			utils.PrintToTable(header, rows, nil)
-			utils.Log.Error(utils.ErrInvalidAPIResponse(err))
-			return
+			wrappedErr := utils.ErrInvalidAPIResponse(err)
+			utils.Log.Error(wrappedErr)
+			return wrappedErr
 		}
 
 		err = json.Unmarshal(data, &version)
 		if err != nil {
 			utils.PrintToTable(header, rows, nil)
-			utils.Log.Error(ErrUnmarshallingAPIData(err))
-			return
+			wrappedErr := ErrUnmarshallingAPIData(err)
+			utils.Log.Error(wrappedErr)
+			return wrappedErr
 		}
 
 		rows[1][1] = version.GetBuild()
 		rows[1][2] = version.GetCommitSHA()
 		utils.PrintToTable(header, rows, nil)
+		return nil
 	},
 }
