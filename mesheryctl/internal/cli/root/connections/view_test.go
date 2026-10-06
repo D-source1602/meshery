@@ -1,14 +1,11 @@
 package connections
 
 import (
-	"bytes"
 	"fmt"
-	"os"
 	"path/filepath"
 	"runtime"
 	"testing"
 
-	"github.com/jarcoal/httpmock"
 	"github.com/meshery/meshery/mesheryctl/internal/cli/pkg/display"
 	"github.com/meshery/meshery/mesheryctl/pkg/utils"
 )
@@ -69,71 +66,45 @@ func TestConnectionViewCmd(t *testing.T) {
 	utils.InvokeMesheryctlTestListCommand(t, update, ConnectionsCmd, tests, currDir, "connection")
 }
 
-// runConnectionViewTest handles all shared scaffolding — mock setup, token,
-// cobra output capture, and command execution. Tests only contain what is
-// unique to their scenario.
-func runConnectionViewTest(t *testing.T, args []string) error {
-	t.Helper()
-	testContext := utils.InitTestEnvironment(t)
-	t.Cleanup(func() { utils.StopMockery(t) })
-	t.Cleanup(func() { utils.ResetCommandFlags(ConnectionsCmd, t) })
-
-	utils.TokenFlag = utils.GetToken(t)
-
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		t.Fatal("cannot determine current working directory")
+// connectionViewRun describes the view invocation shared by the --save tests
+// below, which assert on the file written rather than on golden output.
+func connectionViewRun(commandDir string, args []string) utils.MesheryCommandRun {
+	return utils.MesheryCommandRun{
+		Cmd:        ConnectionsCmd,
+		Args:       args,
+		CommandDir: commandDir,
+		Mocks: []utils.MockURL{
+			{
+				URL:      "/api/integrations/connections/" + connectionId,
+				Response: "view.connection.api.response.golden",
+			},
+		},
 	}
-	fixturesDir := filepath.Join(filepath.Dir(filename), "fixtures")
-
-	apiResponse := utils.NewGoldenFile(t, "view.connection.api.response.golden", fixturesDir).Load()
-	httpmock.RegisterResponder("GET",
-		testContext.BaseURL+"/api/integrations/connections/"+connectionId,
-		httpmock.NewStringResponder(200, apiResponse))
-
-	buf := &bytes.Buffer{}
-	ConnectionsCmd.SetOut(buf)
-	ConnectionsCmd.SetErr(buf)
-	_ = utils.SetupMeshkitLoggerTesting(t, false)
-	ConnectionsCmd.SetArgs(args)
-	return ConnectionsCmd.Execute()
 }
 
-// TestConnectionViewSaveCreatesFile verifies --save writes a file with the
-// correct name and extension. Uses a temp dir so ~/.meshery is never touched.
+// TestConnectionViewSaveCreatesFile verifies that --save writes a file named
+// for the connection and the output format. The home directory is isolated so
+// the real ~/.meshery is never touched.
 func TestConnectionViewSaveCreatesFile(t *testing.T) {
-	tmpHome := t.TempDir()
-	t.Setenv("HOME", tmpHome)
-	t.Setenv("USERPROFILE", tmpHome)
+	mesheryDir := utils.IsolateMesheryHome(t)
 
-	mesheryDir := filepath.Join(tmpHome, ".meshery")
-	if err := os.MkdirAll(mesheryDir, 0755); err != nil {
-		t.Fatalf("cannot create %s: %v", mesheryDir, err)
-	}
-
-	if err := runConnectionViewTest(t, []string{"view", connectionId, "--save"}); err != nil {
+	run := connectionViewRun(utils.CallerDir(t), []string{"view", connectionId, "--save"})
+	if _, err := utils.RunMesheryctlCommand(t, run); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expectedFile := filepath.Join(mesheryDir, "connection_minikube.yaml")
-	if _, err := os.Stat(expectedFile); os.IsNotExist(err) {
-		entries, _ := os.ReadDir(mesheryDir)
-		names := make([]string, 0, len(entries))
-		for _, e := range entries {
-			names = append(names, e.Name())
-		}
-		t.Errorf("--save: expected file %q to exist, got: %v", expectedFile, names)
-	}
+	utils.AssertFileExists(t, filepath.Join(mesheryDir, "connection_minikube.yaml"))
 }
 
 // TestConnectionViewNoSaveWithBrokenHome verifies that view without --save
-// succeeds even when HOME is unset — proving os.UserHomeDir() is not called
-// on the non-save path.
+// succeeds when no home directory can be resolved, proving os.UserHomeDir is
+// not called on the display-only path.
 func TestConnectionViewNoSaveWithBrokenHome(t *testing.T) {
 	t.Setenv("HOME", "")
 	t.Setenv("USERPROFILE", "")
 
-	if err := runConnectionViewTest(t, []string{"view", connectionId}); err != nil {
+	run := connectionViewRun(utils.CallerDir(t), []string{"view", connectionId})
+	if _, err := utils.RunMesheryctlCommand(t, run); err != nil {
 		t.Fatalf("view without --save should succeed even with no HOME: %v", err)
 	}
 }
